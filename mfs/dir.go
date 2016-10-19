@@ -1,6 +1,7 @@
 package mfs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,8 +9,6 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	context "context"
 
 	dag "github.com/ipfs/go-ipfs/merkledag"
 	ft "github.com/ipfs/go-ipfs/unixfs"

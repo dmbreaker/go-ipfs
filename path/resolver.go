@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	merkledag "github.com/ipfs/go-ipfs/merkledag"
+	dag "github.com/ipfs/go-ipfs/merkledag"
 
-	logging "gx/ipfs/QmSpJByNKFX1sCsHBEp3R73FL4NF6FnQTEGyNAXHm2GS52/go-log"
+	logging "gx/ipfs/QmNQynaz7qfriSUJkiEZUrm2Wen1u3Kj9goZzWtrPyu7XR/go-log"
 	cid "gx/ipfs/QmXUuRadqDq5BuFWzVU6VuKaSjTcNm1gNCtLvvP1TJCW4z/go-cid"
 	node "gx/ipfs/QmZx42H5khbVQhV5odp66TApShV4XCujYazcvYduZ4TroB/go-ipld-node"
 )
@@ -32,8 +32,19 @@ func (e ErrNoLink) Error() string {
 
 // Resolver provides path resolution to IPFS
 // It has a pointer to a DAGService, which is uses to resolve nodes.
+// TODO: now that this is more modular, try to unify this code with the
+//       the resolvers in namesys
 type Resolver struct {
-	DAG merkledag.DAGService
+	DAG dag.DAGService
+
+	ResolveOnce func(ctx context.Context, ds dag.DAGService, nd node.Node, name string) (*node.Link, error)
+}
+
+func NewBasicResolver(ds dag.DAGService) *Resolver {
+	return &Resolver{
+		DAG:         ds,
+		ResolveOnce: ResolveSingle,
+	}
 }
 
 // SplitAbsPath clean up and split fpath. It extracts the first component (which
@@ -53,7 +64,9 @@ func SplitAbsPath(fpath Path) (*cid.Cid, []string, error) {
 	}
 
 	c, err := cid.Decode(parts[0])
+	// first element in the path is a cid
 	if err != nil {
+		log.Debug("given path element is not a cid.\n")
 		return nil, nil, err
 	}
 
@@ -73,6 +86,11 @@ func (s *Resolver) ResolvePath(ctx context.Context, fpath Path) (node.Node, erro
 		return nil, err
 	}
 	return nodes[len(nodes)-1], err
+}
+
+func ResolveSingle(ctx context.Context, ds dag.DAGService, nd node.Node, name string) (*node.Link, error) {
+	lnk, _, err := nd.Resolve([]string{name})
+	return lnk, err
 }
 
 // ResolvePathComponents fetches the nodes for each segment of the given path.
@@ -107,26 +125,24 @@ func (s *Resolver) ResolveLinks(ctx context.Context, ndd node.Node, names []stri
 	nd := ndd // dup arg workaround
 
 	// for each of the path components
-	for len(names) > 0 {
+	for _, name := range names {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 
-		lnk, rest, err := nd.Resolve(names)
-		if err == merkledag.ErrLinkNotFound {
-			n := nd.Cid()
-			return result, ErrNoLink{Name: names[0], Node: n}
+		lnk, err := s.ResolveOnce(ctx, s.DAG, nd, name)
+		if err == dag.ErrLinkNotFound {
+			return result, ErrNoLink{Name: name, Node: nd.Cid()}
 		} else if err != nil {
 			return result, err
 		}
 
-		nextnode, err := s.DAG.Get(ctx, lnk.Cid)
+		nextnode, err := lnk.GetNode(ctx, s.DAG)
 		if err != nil {
 			return result, err
 		}
 
 		nd = nextnode
-		names = rest
 		result = append(result, nextnode)
 	}
 	return result, nil

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,8 +16,8 @@ import (
 	mfs "github.com/ipfs/go-ipfs/mfs"
 	path "github.com/ipfs/go-ipfs/path"
 	ft "github.com/ipfs/go-ipfs/unixfs"
+	uio "github.com/ipfs/go-ipfs/unixfs/io"
 
-	context "context"
 	logging "gx/ipfs/QmSpJByNKFX1sCsHBEp3R73FL4NF6FnQTEGyNAXHm2GS52/go-log"
 )
 
@@ -253,11 +254,15 @@ func getNodeFromPath(ctx context.Context, node *core.IpfsNode, p string) (*dag.P
 			return nil, err
 		}
 
-		nd, err := core.Resolve(ctx, node, np)
+		resolver := &path.Resolver{
+			DAG:         node.DAG,
+			ResolveOnce: uio.ResolveUnixfsOnce,
+		}
+
+		nd, err := core.Resolve(ctx, node.Namesys, resolver, np)
 		if err != nil {
 			return nil, err
 		}
-
 		pbnd, ok := nd.(*dag.ProtoNode)
 		if !ok {
 			return nil, dag.ErrNotProtobuf
